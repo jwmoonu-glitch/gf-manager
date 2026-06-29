@@ -3099,12 +3099,21 @@ function showOpsPage() {
   while (bm > 11) { bm -= 12; by++; }
   while (bm < 0)  { bm += 12; by--; }
 
-  // 이전달 YM (운영시프트 기준 이전 달)
+  // loadOpsAdjacentShifts가 opsMonthOffset 기준으로 prev/next 로드
+  loadOpsAdjacentShifts(function(){ opsRender(); });
+}
+
+// 운영시프트 인접 월 shifts 로드 (opsMonthOffset 기준)
+function loadOpsAdjacentShifts(callback) {
+  var now2 = new Date();
+  var bm = now2.getMonth() + opsMonthOffset;
+  var by = now2.getFullYear();
+  while (bm > 11) { bm -= 12; by++; }
+  while (bm < 0)  { bm += 12; by--; }
+
   var prevM = bm === 0 ? 11 : bm - 1;
   var prevY = bm === 0 ? by - 1 : by;
   var prevYm = prevY + '-' + String(prevM + 1).padStart(2,'0');
-
-  // 다음달 YM (운영시프트 기준 다음 달)
   var nextM = bm === 11 ? 0 : bm + 1;
   var nextY = bm === 11 ? by + 1 : by;
   var nextYm = nextY + '-' + String(nextM + 1).padStart(2,'0');
@@ -3114,7 +3123,6 @@ function showOpsPage() {
   window._nextMonthShifts = {};
   window._nextMonthYm = nextYm;
 
-  // 이전달 + 다음달 shifts 동시 로드 후 opsRender
   var p1 = gsGet('getShifts', { yearMonth: prevYm }).then(function(r) {
     if (r.ok && r.data) {
       r.data.forEach(function(row) {
@@ -3135,7 +3143,7 @@ function showOpsPage() {
     }
   }).catch(function(){});
 
-  Promise.all([p1, p2]).then(function(){ opsRender(); }).catch(function(){ opsRender(); });
+  Promise.all([p1, p2]).then(callback).catch(callback);
 }
 
 function hideOpsPage() {
@@ -3184,59 +3192,27 @@ function opsMonthMove(dir) {
   var mf = document.getElementById('monthFilter');
   if (mf) mf.value = String(targetMonth);
 
-  // 이전달/다음달 YM
-  var prevM2 = m === 0 ? 11 : m - 1;
-  var prevY2 = m === 0 ? y - 1 : y;
-  var prevYm2 = prevY2 + '-' + String(prevM2 + 1).padStart(2,'0');
-  var nextM2 = m === 11 ? 0 : m + 1;
-  var nextY2 = m === 11 ? y + 1 : y;
-  var nextYm2 = nextY2 + '-' + String(nextM2 + 1).padStart(2,'0');
-
-  window._prevMonthShifts = {};
-  window._prevMonthYm = prevYm2;
-  window._nextMonthShifts = {};
-  window._nextMonthYm = nextYm2;
-
-  // 현재월 shifts + 이전달 + 다음달 shifts 병렬 로드
-  var pCur = gsGet('getShifts', { yearMonth: targetYm }).then(function(r) {
-    if (!r.ok || !r.data) return;
-    var shiftMap = {};
-    r.data.forEach(function(row) {
-      var ym = String(row[2]||'').replace(/^'/,'').slice(0,7);
-      if (ym !== targetYm) return;
-      var name = String(row[0]);
-      var empStore = String(row[1]);
-      if (!shiftMap[name] || empStore === (employees.find(function(e){return e.name===name;})||{}).store) {
-        shiftMap[name] = row.slice(3).map(function(s){ return String(s||'근무'); });
-      }
-    });
-    var dm = new Date(y, m+1, 0).getDate();
-    employees.forEach(function(emp) {
-      emp.shifts = shiftMap[emp.name] || new Array(dm).fill('근무');
-    });
-  }).catch(function(){});
-
-  var pPrev = gsGet('getShifts', { yearMonth: prevYm2 }).then(function(r) {
+  // 현재월 shifts 로드 후 인접 월 로드
+  gsGet('getShifts', { yearMonth: targetYm }).then(function(r) {
     if (r.ok && r.data) {
+      var shiftMap = {};
       r.data.forEach(function(row) {
         var ym = String(row[2]||'').replace(/^'/,'').slice(0,7);
-        if (ym !== prevYm2) return;
-        window._prevMonthShifts[String(row[0])] = row.slice(3).map(function(s){ return String(s||'근무'); });
+        if (ym !== targetYm) return;
+        var name = String(row[0]);
+        var empStore = String(row[1]);
+        if (!shiftMap[name] || empStore === ((employees.find(function(e){return e.name===name;})||{}).store)) {
+          shiftMap[name] = row.slice(3).map(function(s){ return String(s||'근무'); });
+        }
+      });
+      var dm = new Date(y, m+1, 0).getDate();
+      employees.forEach(function(emp) {
+        emp.shifts = shiftMap[emp.name] || new Array(dm).fill('근무');
       });
     }
-  }).catch(function(){});
-
-  var pNext = gsGet('getShifts', { yearMonth: nextYm2 }).then(function(r) {
-    if (r.ok && r.data) {
-      r.data.forEach(function(row) {
-        var ym = String(row[2]||'').replace(/^'/,'').slice(0,7);
-        if (ym !== nextYm2) return;
-        window._nextMonthShifts[String(row[0])] = row.slice(3).map(function(s){ return String(s||'근무'); });
-      });
-    }
-  }).catch(function(){});
-
-  Promise.all([pCur, pPrev, pNext]).then(function(){ opsRender(); }).catch(function(){ opsRender(); });
+    // opsMonthOffset이 이미 업데이트됐으므로 loadOpsAdjacentShifts가 정확한 prev/next 계산
+    loadOpsAdjacentShifts(function(){ opsRender(); });
+  }).catch(function(){ loadOpsAdjacentShifts(function(){ opsRender(); }); });
 }
 
 function opsDateKey(d) {
